@@ -1,5 +1,9 @@
 # Skill Recorder
 
+> **Azure OpenAI fork for macOS:** start with [AZURE.md](AZURE.md).
+> This fork defaults to Azure OpenAI and keeps the local Copilot SDK/CLI runtime.
+> The upstream installation and GitHub sign-in instructions below apply to Copilot mode.
+
 **Record yourself doing a task once, then turn it into a skill your AI agent can repeat.**
 
 > [!TIP]

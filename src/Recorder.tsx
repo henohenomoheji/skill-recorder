@@ -1,3 +1,4 @@
+import { ModelSettings } from "./ModelSettings";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type {
@@ -685,10 +686,11 @@ export function Recorder() {
         </span>
       </button>
 
+      <ModelSettings disabled={recording} />
       {doctor && (
         <div className="doctor">
           <Row
-            label="GitHub Copilot"
+            label="AI runtime"
             status={doctor.copilotCli.ok ? "good" : "bad"}
             note={doctor.copilotCli.ok ? "found" : "missing"}
           />

@@ -11,6 +11,7 @@ import type {
   TargetPlacement,
 } from "./skill";
 import type { RecorderState } from "./types";
+import type { ModelSettingsInput, ModelSettingsView, ModelSettingsResult, ModelConnectionResult } from "./model-settings";
 import type {
   SupportedShellId,
   TerminalActionResult,
@@ -465,6 +466,10 @@ export const IPC = {
   status: "recorder:status",
   marker: "recorder:marker",
   doctor: "doctor:check",
+  modelSettings: "model:settings",
+  modelSettingsSave: "model:settings-save",
+  modelSettingsChanged: "model:settings-changed",
+  modelConnectionTest: "model:connection-test",
   copilotSignIn: "copilot:sign-in",
   copilotSignInCancel: "copilot:sign-in-cancel",
   statusChanged: "recorder:status-changed",
@@ -545,6 +550,10 @@ export interface SkillRecorderApi {
   status(): Promise<RecorderStatus>;
   marker(note: string): Promise<MarkerResult>;
   doctor(): Promise<DoctorReport>;
+  modelSettings(): Promise<ModelSettingsView>;
+  saveModelSettings(input: ModelSettingsInput): Promise<ModelSettingsResult>;
+  testModelConnection(): Promise<ModelConnectionResult>;
+  onModelSettingsChanged(cb: (settings: ModelSettingsView) => void): () => void;
   /**
    * Sign in through the browser using the bundled CLI and verify authentication.
    * The attempt ID scopes cancellation to the requesting panel.

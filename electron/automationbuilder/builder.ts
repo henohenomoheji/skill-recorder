@@ -20,6 +20,7 @@ import { requireCatalogue } from "../architectures/catalogue-registry";
 import { AgentBuilder, type BaseLive } from "../builders/agent-builder";
 import { createReadTools } from "../builders/read-tools";
 import { loadPersistedAnalysis } from "../describer/describer";
+import { assertModelSettingsStable } from "../model-settings-store";
 import { createLogger } from "../logger";
 import { isValidSessionId, sessionDir } from "../recorder/session-store";
 import { AUTOMATION_BUILDER_INSTRUCTIONS } from "./instructions";
@@ -84,6 +85,7 @@ export class AutomationBuilder extends AgentBuilder<LiveBuild> {
 
   /** Propose a plan (first pass) or refine the current one with NL feedback. */
   async build(input: AutomationBuildInput): Promise<AutomationPlan> {
+    assertModelSettingsStable();
     const { sessionId, architecture, feedback } = input;
     if (this.active.has(sessionId)) throw new Error("A build is already running for this session.");
     requireCatalogue(architecture, "automation");
@@ -112,6 +114,7 @@ export class AutomationBuilder extends AgentBuilder<LiveBuild> {
    *  ({@link toAutomationImport}), so what the user reviewed is exactly what ships. Throws
    *  if the plan has no steps (a bundle needs ≥1). */
   async create(sessionId: string, editedPlan?: AutomationPlan): Promise<{ automation: BuiltAutomation; path: string }> {
+    assertModelSettingsStable();
     if (this.active.has(sessionId)) throw new Error("Wait for the current step to finish.");
     const held = this.live.get(sessionId);
     // Prefer the user's edited plan from the review tiles; fall back to the last
@@ -181,6 +184,7 @@ export class AutomationBuilder extends AgentBuilder<LiveBuild> {
       enableHostGitOperations: false,
       infiniteSessions: { enabled: false },
       availableTools: tools.map((t) => t.name),
+      ...this.sessionOptions,
       ...(this.model ? { model: this.model } : {}),
     });
 
@@ -203,7 +207,7 @@ export class AutomationBuilder extends AgentBuilder<LiveBuild> {
       await live.copilot.sendAndWait(prompt, TURN_TIMEOUT_MS);
     } catch (err) {
       await live.copilot.abort().catch(() => undefined);
-      throw new Error(`Planning failed: ${msg(err)}`);
+      throw new Error(`Planning failed: ${this.modelError(err)}`);
     }
     const plan = live.holder.plan;
     if (!plan) throw new Error("The agent finished without proposing a plan.");

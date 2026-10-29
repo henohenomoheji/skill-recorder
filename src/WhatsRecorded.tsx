@@ -1,3 +1,4 @@
+import { AnalysisDestination } from "./ModelSettings";
 import { useEffect, useRef } from "react";
 
 import type { SensitiveModelStatus } from "../common/ipc";
@@ -174,7 +175,7 @@ export function WhatsRecorded({
               When you choose Analyze, the event timeline (window and document titles, URLs, and
               clipboard previews and recorded-terminal commands), plus screen images, narration
               text, and only the bounded terminal-output excerpts needed for analysis, are sent
-              to GitHub&apos;s cloud service and processed by GitHub Copilot.
+              to <AnalysisDestination /> for processing.
             </li>
             <li>
               By default, before anything is sent, this computer hides sensitive details like

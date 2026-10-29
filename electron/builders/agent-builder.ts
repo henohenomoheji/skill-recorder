@@ -1,6 +1,7 @@
-import { CopilotClient, type CopilotSession } from "@github/copilot-sdk";
+import { CopilotClient, type CopilotSession, type SessionConfig } from "@github/copilot-sdk";
 
-import { COPILOT_SIGNED_OUT_ERROR } from "../../common/ipc";
+import { modelClientOptions, modelSessionOptions, modelRunError, verifyModelAccess } from "../model-config";
+import { modelSettingsStore, modelRuntimeDirectory, assertModelSettingsStable } from "../model-settings-store";
 import { copilotConnectionOption, withStartupTimeout } from "../copilot-cli-path";
 import { createLogger } from "../logger";
 
@@ -24,6 +25,11 @@ export abstract class AgentBuilder<TLive extends BaseLive> {
   private client: CopilotClient | null = null;
   private clientStart: Promise<CopilotClient> | null = null;
   protected model: string | undefined;
+  protected sessionOptions: Pick<SessionConfig, "provider" | "model" | "modelCapabilities"> = {};
+
+  hasActiveOperations(): boolean { return this.active.size > 0; }
+
+  protected modelError(error: unknown): string { return modelRunError(error, this.sessionOptions); }
   protected readonly live = new Map<string, TLive>();
   protected readonly active = new Set<string>();
   protected readonly log;
@@ -65,16 +71,20 @@ export abstract class AgentBuilder<TLive extends BaseLive> {
   protected async ensureClient(): Promise<CopilotClient> {
     if (this.client) return this.client;
     if (this.clientStart) return this.clientStart;
+    assertModelSettingsStable();
+    const config = modelSettingsStore().read();
+    this.sessionOptions = modelSessionOptions(config);
     this.clientStart = (async () => {
-      const client = new CopilotClient(copilotConnectionOption());
-      await withStartupTimeout(client.start(), `Copilot CLI (${this.name})`);
-      const auth = await client.getAuthStatus();
-      if (!auth.isAuthenticated) {
+      const client = new CopilotClient({ ...copilotConnectionOption(), ...modelClientOptions(config, modelRuntimeDirectory()) });
+      try {
+        await withStartupTimeout(client.start(), `Copilot CLI (${this.name})`);
+        await verifyModelAccess(client, config);
+      } catch (error) {
         await client.stop().catch(() => undefined);
-        throw new Error(COPILOT_SIGNED_OUT_ERROR);
+        throw new Error(modelRunError(error, this.sessionOptions));
       }
-      this.model = process.env.SKILL_RECORDER_MODEL || undefined;
-      this.log.info("Copilot ready", auth.login ? `as ${auth.login}` : "");
+      this.model = this.sessionOptions.model;
+      this.log.info(`${config.provider} model runtime ready`);
       this.client = client;
       return client;
     })();
