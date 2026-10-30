@@ -6,6 +6,12 @@ import { RuntimeConnection } from "@github/copilot-sdk";
 
 const require = createRequire(import.meta.url);
 
+/** spawn cannot execute an Electron ASAR virtual path, even when existsSync can see it. */
+export function executableOnDisk(file: string, exists: (file: string) => boolean = existsSync): string | undefined {
+  const physical = file.replace(/\.asar([\\/])/, ".asar.unpacked$1");
+  return exists(physical) ? physical : undefined;
+}
+
 /**
  * Resolve the path to the bundled Copilot CLI binary. The SDK's own resolution
  * (`getBundledCliPath`) uses `import.meta.resolve` relative to its bundle location,
@@ -19,13 +25,15 @@ export function resolveCopilotCliPath(): string | undefined {
   const packageName = `@github/copilot-${platform}-${arch}`;
   try {
     const resolved = require.resolve(packageName);
-    if (existsSync(resolved)) return resolved;
+    const executable = executableOnDisk(resolved);
+    if (executable) return executable;
   } catch {}
   try {
     const pkgDir = path.dirname(require.resolve(`${packageName}/package.json`));
     const binName = process.platform === "win32" ? "copilot.exe" : "copilot";
     const binPath = path.join(pkgDir, binName);
-    if (existsSync(binPath)) return binPath;
+    const executable = executableOnDisk(binPath);
+    if (executable) return executable;
   } catch {}
   return undefined;
 }

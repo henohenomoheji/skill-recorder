@@ -9,6 +9,7 @@ export async function testModelConnection(config: ModelConfig): Promise<ModelCon
   const options = modelSessionOptions(config);
   const client = new CopilotClient({ ...copilotConnectionOption(), ...modelClientOptions(config, modelRuntimeDirectory()) });
   let session: CopilotSession | undefined;
+  let stage = "starting the local AI runtime";
   try {
     await withStartupTimeout(client.start(), "AI connection test");
     await verifyModelAccess(client, config);
@@ -38,19 +39,22 @@ export async function testModelConnection(config: ModelConfig): Promise<ModelCon
         },
       },
     ];
+    stage = "creating the AI session";
     session = await client.createSession({
       ...options, tools, availableTools: tools.map((tool) => tool.name),
       systemMessage: { mode: "append", content: "Use only the supplied test tools. Never use the filesystem or network tools." },
       onPermissionRequest: approveAll, enableHostGitOperations: false, infiniteSessions: { enabled: false },
     });
+    stage = "checking Azure image input and tool calls";
     await session.sendAndWait("Remember the word maple. Call get_test_image, then submit_test with the dominant color you see. Stop after submitting.", 60_000);
     if (!submitted) throw new Error("The model did not complete the image and tool-call test.");
+    stage = "checking the follow-up conversation";
     await session.sendAndWait("Call submit_test with the word I asked you to remember in the previous turn. Stop after submitting.", 30_000);
     if (!followup) throw new Error("The model did not complete the follow-up conversation test.");
     return { ok: true, message: "Connected. Image input, tool calls, and follow-up conversation passed. No recordings were sent." };
   } catch {
     // Provider errors may contain request bodies or credentials; never forward them.
-    return { ok: false, message: "Connection test failed. Check the endpoint, deployment, key, API format, model image/tool support, and Azure quota. No recordings were sent." };
+    return { ok: false, message: `Connection test failed while ${stage}. ${stage === "starting the local AI runtime" ? "Restart or update the app; the local runtime could not start." : "Check the endpoint, deployment, key, API format, model image/tool support, and Azure quota."} No recordings were sent.` };
   } finally {
     await session?.abort().catch(() => undefined);
     await session?.disconnect().catch(() => undefined);
