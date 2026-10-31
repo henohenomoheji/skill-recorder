@@ -1,16 +1,11 @@
-import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
 import { RuntimeConnection } from "@github/copilot-sdk";
+import { unpackedPathOnDisk as executableOnDisk } from "./unpacked-path";
+export { unpackedPathOnDisk as executableOnDisk } from "./unpacked-path";
 
 const require = createRequire(import.meta.url);
-
-/** spawn cannot execute an Electron ASAR virtual path, even when existsSync can see it. */
-export function executableOnDisk(file: string, exists: (file: string) => boolean = existsSync): string | undefined {
-  const physical = file.replace(/\.asar([\\/])/, ".asar.unpacked$1");
-  return exists(physical) ? physical : undefined;
-}
 
 /**
  * Resolve the path to the bundled Copilot CLI binary. The SDK's own resolution

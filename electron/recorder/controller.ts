@@ -305,6 +305,11 @@ export class RecorderController {
     this.shuttingDown = true;
   }
 
+  /** A failed drain must leave the app usable rather than trapped in shutdown. */
+  cancelShutdown(): void {
+    this.shuttingDown = false;
+  }
+
   private async startInternal(options?: StartOptions): Promise<StartResult> {
     if (this.store) return { ok: false, error: "Already recording" };
     if (

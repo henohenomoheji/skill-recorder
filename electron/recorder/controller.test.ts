@@ -366,6 +366,10 @@ test("shutdown rejects queued and future recording starts", async () => {
     assert.equal(result.ok, false);
     assert.match(result.error ?? "", /shutting down/i);
     assert.equal(controller.status().state, "idle");
+    assert.equal((await controller.start()).ok, false);
+    controller.cancelShutdown();
+    assert.equal((await controller.start()).ok, true);
+    assert.equal((await controller.stop()).ok, true);
   });
 });
 

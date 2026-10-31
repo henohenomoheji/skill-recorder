@@ -27,6 +27,10 @@ does not require GitHub Copilot sign-in. The upstream source baseline is
 
 Settings changes close idle AI conversations and invalidate prepared previews.
 Saving/testing is rejected while recording or while an AI operation is active.
+Only one instance can use the same app-data folder. Quitting drains recording
+writes and post-processing before disposing background services and exiting;
+reopening starts a fresh recorder. If a recording cannot be finalized, shutdown
+is canceled so the app remains usable and can retry.
 Live Azure recording analysis cannot be verified until a working key is entered.
 
 Automation generation exports an agent-specific bundle; it does not create an
