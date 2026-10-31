@@ -53,7 +53,7 @@ export function createRecorderWindow(): BrowserWindow {
     resizable: false,
     maximizable: false,
     fullscreenable: false,
-    title: "Skill Recorder",
+    title: "Skill Recorder Azure",
     icon: windowIcon(),
     backgroundColor: "#faf8f5",
     webPreferences: {

@@ -1,3 +1,6 @@
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+import { unpackedPathOnDisk } from "../unpacked-path";
 import type { Collector, CollectorContext } from "../recorder/collector";
 import { createUrlProvider, type UrlProvider } from "./url-provider";
 import type { ActiveWindowResult } from "./window-info";
@@ -19,6 +22,7 @@ const URL_MIN_INTERVAL_MS = 1500;
 const FULL = { accessibilityPermission: true, screenRecordingPermission: true } as const;
 const DEGRADED = { accessibilityPermission: false, screenRecordingPermission: false } as const;
 const GET_WINDOWS_PACKAGE = "get-windows";
+const require = createRequire(import.meta.url);
 
 interface GetWindowsModule {
   activeWindow(options: typeof FULL | typeof DEGRADED): Promise<ActiveWindowResult | undefined>;
@@ -115,7 +119,11 @@ export class ActiveWindowCollector implements Collector {
       const { readWindowsActiveWindow } = await import("./windows-active-window");
       return readWindowsActiveWindow();
     }
-    const { activeWindow } = await import(GET_WINDOWS_PACKAGE) as GetWindowsModule;
+    // The module spawns a sibling native executable. Load the unpacked module
+    // itself so its import.meta.url points to a real directory in packaged apps.
+    const modulePath = unpackedPathOnDisk(require.resolve(GET_WINDOWS_PACKAGE));
+    if (!modulePath) throw new Error("The active-window helper is unavailable.");
+    const { activeWindow } = await import(/* @vite-ignore */ pathToFileURL(modulePath).href) as GetWindowsModule;
     return activeWindow(this.mode === "full" ? FULL : DEGRADED);
   }
 

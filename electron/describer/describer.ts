@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { approveAll, CopilotClient, type CopilotSession } from "@github/copilot-sdk";
+import { approveAll, CopilotClient, type CopilotSession, type SessionConfig } from "@github/copilot-sdk";
 
 import {
   AnalysisSchema,
@@ -10,12 +10,14 @@ import {
   type AnalysisFeedback,
   type AnalysisSubmission,
 } from "../../common/analysis";
-import { COPILOT_SIGNED_OUT_ERROR, type AnalyzeProgress } from "../../common/ipc";
+import type { AnalyzeProgress } from "../../common/ipc";
 import type { SessionMeta } from "../../common/types";
 import { FrameExtractor } from "../frames/extractor";
 import { createLogger } from "../logger";
 import { copilotConnectionOption, withStartupTimeout } from "../copilot-cli-path";
 import { sessionsRoot, sessionDir, isValidSessionId } from "../recorder/session-store";
+import { modelClientOptions, modelSessionOptions, modelRunError, verifyModelAccess } from "../model-config";
+import { modelSettingsStore, modelRuntimeDirectory, assertModelSettingsStable } from "../model-settings-store";
 import { DESCRIBER_INSTRUCTIONS } from "./instructions";
 import { createDescriberTools, type RedactionContext } from "./tools";
 
@@ -87,6 +89,9 @@ export class Describer {
   private client: CopilotClient | null = null;
   private clientStart: Promise<CopilotClient> | null = null;
   private model: string | undefined;
+  private sessionOptions: Pick<SessionConfig, "provider" | "model" | "modelCapabilities"> = {};
+
+  hasActiveOperations(): boolean { return this.active.size > 0; }
   private readonly live = new Map<string, LiveSession>();
   private readonly active = new Set<string>();
 
@@ -94,6 +99,7 @@ export class Describer {
 
   /** First pass: reconstruct the session from scratch. */
   async analyze(sessionId: string, redaction?: RedactionContext): Promise<Analysis> {
+    assertModelSettingsStable();
     if (this.active.has(sessionId)) throw new Error("An analysis is already running for this session.");
     this.active.add(sessionId);
     try {
@@ -109,6 +115,7 @@ export class Describer {
 
   /** Later pass: fold in NL feedback and revise holistically. */
   async feedback(sessionId: string, fb: AnalysisFeedback, redaction?: RedactionContext): Promise<Analysis> {
+    assertModelSettingsStable();
     if (this.active.has(sessionId)) throw new Error("An analysis is already running for this session.");
     this.active.add(sessionId);
     try {
@@ -194,18 +201,22 @@ export class Describer {
   private async ensureClient(): Promise<CopilotClient> {
     if (this.client) return this.client;
     if (this.clientStart) return this.clientStart;
+    assertModelSettingsStable();
+    const config = modelSettingsStore().read();
+    this.sessionOptions = modelSessionOptions(config);
     this.clientStart = (async () => {
       const connOpts = copilotConnectionOption();
       if (connOpts) log.info("CLI path resolved from node_modules");
-      const client = new CopilotClient(connOpts);
-      await withStartupTimeout(client.start(), "Copilot CLI (Describer)");
-      const auth = await client.getAuthStatus();
-      if (!auth.isAuthenticated) {
+      const client = new CopilotClient({ ...connOpts, ...modelClientOptions(config, modelRuntimeDirectory()) });
+      try {
+        await withStartupTimeout(client.start(), "Copilot CLI (Describer)");
+        await verifyModelAccess(client, config);
+        this.model = config.provider === "azure" ? this.sessionOptions.model : await this.pickVisionModel(client);
+      } catch (error) {
         await client.stop().catch(() => undefined);
-        throw new Error(COPILOT_SIGNED_OUT_ERROR);
+        throw new Error(modelRunError(error, this.sessionOptions));
       }
-      this.model = await this.pickVisionModel(client);
-      log.info("Copilot ready", auth.login ? `as ${auth.login}` : "", this.model ? `· model ${this.model}` : "");
+      log.info(`${config.provider} model runtime ready`);
       this.client = client;
       return client;
     })();
@@ -261,6 +272,7 @@ export class Describer {
       workingDirectory: dir,
       enableHostGitOperations: false,
       infiniteSessions: { enabled: false },
+      ...this.sessionOptions,
       ...(this.model ? { model: this.model } : {}),
     };
     // Always constrain the agent to our sandboxed custom tools. If the runtime
@@ -320,7 +332,7 @@ export class Describer {
     } catch (err) {
       // Don't leave the agent running past our timeout/abort — reclaim the turn.
       await live.copilot.abort().catch(() => undefined);
-      throw new Error(`Analysis run failed: ${msg(err)}`);
+      throw new Error(`Analysis run failed: ${modelRunError(err, this.sessionOptions)}`);
     }
     if (!live.holder.submission) {
       this.emit(live.sessionId, "working", "Asking the agent to finalize its analysis…");

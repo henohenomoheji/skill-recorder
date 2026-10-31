@@ -23,6 +23,7 @@ import { requireCatalogue } from "../architectures/catalogue-registry";
 import { AgentBuilder, type BaseLive } from "../builders/agent-builder";
 import { createReadTools } from "../builders/read-tools";
 import { loadPersistedAnalysis } from "../describer/describer";
+import { assertModelSettingsStable } from "../model-settings-store";
 import { createLogger } from "../logger";
 import { isValidSessionId, sessionDir } from "../recorder/session-store";
 import { SKILL_BUILDER_INSTRUCTIONS } from "./instructions";
@@ -129,6 +130,7 @@ export class SkillBuilder extends AgentBuilder<LiveBuild> {
 
   /** Propose a plan (first pass) or refine the current one with NL feedback. */
   async build(input: SkillBuildInput): Promise<SkillPlan> {
+    assertModelSettingsStable();
     const { sessionId, architecture, feedback } = input;
     if (this.active.has(sessionId)) throw new Error("A build is already running for this session.");
     requireCatalogue(architecture, "skill");
@@ -250,6 +252,7 @@ export class SkillBuilder extends AgentBuilder<LiveBuild> {
   // --- internals -----------------------------------------------------------
 
   private begin(sessionId: string): BuildOperation {
+    assertModelSettingsStable();
     if (this.active.has(sessionId)) throw new Error("Wait for the current step to finish.");
     const operation: BuildOperation = { canceled: false };
     this.active.add(sessionId);
@@ -294,7 +297,7 @@ export class SkillBuilder extends AgentBuilder<LiveBuild> {
       await live.copilot.sendAndWait(`${CREATE_PROMPT}\n\n${renderPlanForPrompt(plan)}`, TURN_TIMEOUT_MS);
     } catch (err) {
       await live.copilot.abort().catch(() => undefined);
-      throw new Error(`Skill build failed: ${msg(err)}`);
+      throw new Error(`Skill build failed: ${this.modelError(err)}`);
     }
     this.requireActive(operation);
     const submission = live.holder.submission as SkillSubmission | undefined;
@@ -353,6 +356,7 @@ export class SkillBuilder extends AgentBuilder<LiveBuild> {
       enableHostGitOperations: false,
       infiniteSessions: { enabled: false },
       availableTools: tools.map((t) => t.name),
+      ...this.sessionOptions,
       ...(this.model ? { model: this.model } : {}),
     });
 
@@ -379,7 +383,7 @@ export class SkillBuilder extends AgentBuilder<LiveBuild> {
       await live.copilot.sendAndWait(prompt, TURN_TIMEOUT_MS);
     } catch (err) {
       await live.copilot.abort().catch(() => undefined);
-      throw new Error(`Planning failed: ${msg(err)}`);
+      throw new Error(`Planning failed: ${this.modelError(err)}`);
     }
     this.requireActive(operation);
     const plan = live.holder.plan;

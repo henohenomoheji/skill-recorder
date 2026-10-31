@@ -45,6 +45,8 @@ import { initialSkillReviewState, SkillOperationGuard, skillReviewBusy, skillRev
 import { SensitiveReview } from "./SensitiveReview";
 import { AnalysisRecovery, completeSignIn, type AnalysisRun } from "./analysis-recovery";
 
+import { ModelSettings, AnalysisDestination } from "./ModelSettings";
+
 export function Library() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -107,6 +109,7 @@ export function Library() {
             {notice}
           </button>
         )}
+        <ModelSettings />
         <div className="lib-list-scroll">
           <SessionsList
             sessions={sessions}
@@ -899,11 +902,11 @@ function AnalysisWorkspace({
               Analyze recording
             </button>
             <details className="analyze-disclosure">
-              <summary>What gets sent to GitHub Copilot</summary>
+              <summary>What gets sent for AI analysis</summary>
               <p>
                 When you choose Analyze, the event timeline (window and document titles, URLs, and
                 clipboard previews), plus screen images, narration text, and other content you
-                provide, are sent to GitHub&apos;s cloud service for processing by GitHub Copilot.{" "}
+                provide, are sent for processing by <AnalysisDestination />.{" "}
                 <span className="cloud-analysis-caution">
                   Do not analyze a recording that may contain passwords, access tokens, API keys,
                   credentials, secrets, or other sensitive or confidential information.

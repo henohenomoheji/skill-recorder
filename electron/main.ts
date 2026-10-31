@@ -8,6 +8,7 @@ import {
   screen,
 } from "electron";
 
+import { ShutdownCoordinator } from "./shutdown";
 import { FULL_CAPTURE } from "../common/config";
 import { IPC, type RecorderStatus, type StartResult } from "../common/ipc";
 import type {
@@ -47,6 +48,9 @@ import {
 
 const log = createLogger("Main");
 
+// A second process must not share the recorder, shortcuts, or saved settings.
+if (!app.requestSingleInstanceLock()) app.exit(0);
+
 // Contain stray async failures so a lost stream error can't crash the main
 // process (and the recording in progress). Registered before any window/IO work.
 installCrashGuards(log);
@@ -63,8 +67,6 @@ let terminalSession: TerminalSession | null = null;
 let terminalSessionId: string | null = null;
 let recorderHome: Electron.Rectangle | null = null;
 let controlsExpanded = false;
-let quitReady = false;
-let quitTask: Promise<void> | null = null;
 let recordingStartPending = false;
 const recordingPrivacy = new RecordingPrivacySession();
 const narration = new NarrationManager((status) =>
@@ -539,6 +541,7 @@ app.whenReady().then(async () => {
   }
 
   app.on("activate", () => {
+    if (shutdown.requested) return;
     if (recorder.state === "recording") {
       showRecordingControls();
       return;
@@ -551,48 +554,51 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", (event) => {
-  if (quitReady) return;
-  event.preventDefault();
-  if (quitTask) return;
-  quitTask = (async () => {
+const shutdown = new ShutdownCoordinator({
+  confirm: async () => {
     const terminal = terminalSession?.busyDetails() ?? { busy: false, command: null };
-    if (terminal.busy) {
-      const { response } = await dialog.showMessageBox({
-        type: "warning",
-        buttons: ["Keep recording", "Close terminal and quit"],
-        defaultId: 0,
-        cancelId: 0,
-        message: "A terminal command is still running.",
-        detail: terminal.command
-          ? `Closing Skill Recorder will interrupt: ${terminal.command}`
-          : "Closing Skill Recorder will interrupt the active terminal session.",
-      });
-      if (response === 0) return;
-    }
-    recorder.beginShutdown();
-    // stop() is serialized behind any start/mic/discard operation already in
-    // flight, and is a harmless "Not recording" result when the app is idle.
-    await recorder.stop(terminal.busy);
-    await recorder.whenProcessed();
-    quitReady = true;
-    app.quit();
-  })()
-    .catch((error) => {
-      log.warn("graceful shutdown failed:", error);
-      quitReady = true;
-      app.quit();
-    })
-    .finally(() => {
-      quitTask = null;
+    if (!terminal.busy) return true;
+    const { response } = await dialog.showMessageBox({
+      type: "warning", buttons: ["Keep recording", "Close terminal and quit"],
+      defaultId: 0, cancelId: 0, message: "A terminal command is still running.",
+      detail: terminal.command
+        ? `Closing Skill Recorder will interrupt: ${terminal.command}`
+        : "Closing Skill Recorder will interrupt the active terminal session.",
     });
+    return response === 1;
+  },
+  drain: async () => {
+    recorder.beginShutdown();
+    try {
+      const terminal = terminalSession?.busyDetails() ?? { busy: false, command: null };
+      const result = await recorder.stop(terminal.busy);
+      if (recorder.state === "recording") throw new Error(result.error ?? "Recording could not be finalized.");
+      await recorder.whenProcessed();
+    } catch (error) {
+      recorder.cancelShutdown();
+      throw error;
+    }
+  },
+  cleanup: async () => {
+    globalShortcut.unregisterAll();
+    await Promise.allSettled([
+      Promise.resolve().then(() => microphones.dispose()),
+      describer.dispose(), builder.dispose(), automationBuilder.dispose(), sensitiveModels.dispose(),
+    ]);
+  },
+  // app.quit() can be canceled/re-entered by window lifecycle events. At this
+  // point recording writes are drained and services are disposed: exit once.
+  exit: () => app.exit(0),
+  report: (error) => log.warn("graceful shutdown:", error),
 });
 
-app.on("will-quit", () => {
-  globalShortcut.unregisterAll();
-  void describer.dispose();
-  void builder.dispose();
-  void automationBuilder.dispose();
-  microphones.dispose();
-  void sensitiveModels.dispose();
+app.on("before-quit", (event) => {
+  event.preventDefault();
+  void shutdown.request().catch((error) => log.warn("quit confirmation failed:", error));
+});
+
+app.on("second-instance", () => {
+  if (shutdown.requested) return;
+  const win = recorder.state === "recording" ? recordingControlsWindow : recorderWindow;
+  if (win && !win.isDestroyed()) { win.show(); win.focus(); }
 });

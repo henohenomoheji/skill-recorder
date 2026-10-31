@@ -28,6 +28,9 @@ import type {
   SkillPlanResult,
   SkillPreviewResult,
 } from "../common/ipc";
+import type { ModelSettingsInput, ModelSettingsResult, ModelConnectionResult } from "../common/model-settings";
+import { modelSettingsStore, setModelSettingsChanging } from "./model-settings-store";
+import { testModelConnection } from "./model-connection";
 import { IPC } from "../common/ipc";
 import type { AutomationPlan } from "../common/automation";
 import type { NarrationLanguage } from "../common/narration";
@@ -165,6 +168,54 @@ export function registerIpc(
   ipcMain.handle(IPC.status, () => recorder.status());
   ipcMain.handle(IPC.marker, (_event, note: string) => recorder.marker(note));
   ipcMain.handle(IPC.doctor, () => runDoctor());
+
+  let changingModel = false;
+  const requireModelIdle = () => {
+    if (changingModel || isRecordingStartPending() || recorder.state === "recording" ||
+        describer.hasActiveOperations() || builder.hasActiveOperations() || automationBuilder.hasActiveOperations()) {
+      throw new Error("Finish recording and wait for AI operations before changing or testing AI settings.");
+    }
+  };
+  ipcMain.handle(IPC.modelSettings, () => modelSettingsStore().view());
+  ipcMain.handle(IPC.modelSettingsSave, async (_event, input: ModelSettingsInput): Promise<ModelSettingsResult> => {
+    let ownsLock = false;
+    try {
+      requireModelIdle();
+      changingModel = true;
+      ownsLock = true;
+      setModelSettingsChanging(true);
+      const settings = modelSettingsStore().save(input);
+      await Promise.all([describer.dispose(), builder.dispose(), automationBuilder.dispose()]);
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send(IPC.modelSettingsChanged, settings);
+      }
+      return { ok: true, settings };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : "Could not save AI settings." };
+    } finally {
+      if (ownsLock) {
+        changingModel = false;
+        setModelSettingsChanging(false);
+      }
+    }
+  });
+  ipcMain.handle(IPC.modelConnectionTest, async (): Promise<ModelConnectionResult> => {
+    let ownsLock = false;
+    try {
+      requireModelIdle();
+      changingModel = true;
+      ownsLock = true;
+      setModelSettingsChanging(true);
+      return await testModelConnection(modelSettingsStore().read());
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : "Could not test AI settings." };
+    } finally {
+      if (ownsLock) {
+        changingModel = false;
+        setModelSettingsChanging(false);
+      }
+    }
+  });
   app.once("before-quit", disposeCopilotSignIn);
   ipcMain.handle(IPC.copilotSignIn, async (event, attemptId: unknown) => {
     if (typeof attemptId !== "string" || !/^[a-zA-Z0-9-]{1,64}$/.test(attemptId)) {

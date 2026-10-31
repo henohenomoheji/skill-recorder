@@ -1,8 +1,9 @@
-import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
 import { RuntimeConnection } from "@github/copilot-sdk";
+import { unpackedPathOnDisk as executableOnDisk } from "./unpacked-path";
+export { unpackedPathOnDisk as executableOnDisk } from "./unpacked-path";
 
 const require = createRequire(import.meta.url);
 
@@ -19,13 +20,15 @@ export function resolveCopilotCliPath(): string | undefined {
   const packageName = `@github/copilot-${platform}-${arch}`;
   try {
     const resolved = require.resolve(packageName);
-    if (existsSync(resolved)) return resolved;
+    const executable = executableOnDisk(resolved);
+    if (executable) return executable;
   } catch {}
   try {
     const pkgDir = path.dirname(require.resolve(`${packageName}/package.json`));
     const binName = process.platform === "win32" ? "copilot.exe" : "copilot";
     const binPath = path.join(pkgDir, binName);
-    if (existsSync(binPath)) return binPath;
+    const executable = executableOnDisk(binPath);
+    if (executable) return executable;
   } catch {}
   return undefined;
 }
